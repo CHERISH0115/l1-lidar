@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(apt-cache show *)",
+      "Bash(dpkg -l libtinyxml2* libpython3.12*)",
+      "Bash(dpkg -l libtinyxml2* libpython3*)",
+      "Bash(awk '{print $2, $3}')",
+      "Bash(docker exec ros2_ws *)",
+      "Bash(docker run *)",
+      "Bash(docker exec l1_driver *)"
+    ]
+  }
+}

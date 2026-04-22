@@ -1,0 +1,11 @@
+FROM ros:jazzy-ros-base
+
+RUN apt-get update && apt-get install -y \
+    libqt5widgets5t64 \
+    libqt5opengl5t64 \
+    libqt5waylandclient5 \
+    qtwayland5 \
+    qtbase5-dev \
+    libqt5opengl5-dev \
+    ros-jazzy-tf2 \
+    && rm -rf /var/lib/apt/lists/*

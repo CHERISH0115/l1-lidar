@@ -1,0 +1,10 @@
+{
+  "name": "l1_driver",
+  "version": "0.0.1",
+  "description": "Unitree L1 LiDAR ROS2 driver",
+  "maintainer": [{"name": "user", "email": "user@example.com"}],
+  "license": "MIT",
+  "buildtool_depend": ["ament_cmake"],
+  "depend": ["rclcpp", "sensor_msgs", "std_msgs"],
+  "export": {"build_type": "ament_cmake"}
+}
