@@ -1,31 +1,24 @@
-# FAST-LIO2 配置 —— 宇树 L1 激光雷达
-common:
-  lid_topic:  "/scan"
-  imu_topic:  "/imu/data_raw"
-  time_sync_en: false
+fast_lio:
+  ros__parameters:
+    common.lid_topic:  "/scan"
+    common.imu_topic:  "/imu/data_raw"
 
-  # 点云预处理
-  lidar_type: 3          # 3 = 标准 PointCloud2（x y z intensity time）
-  scan_line:  18         # L1 垂直线数
-  blind: 0.3             # 近距离盲区 (m)
-  det_range: 40.0        # 最大探测距离 (m)
-  timestamp_unit: 1      # 0=ms 1=s 2=us 3=100us
+    common.lidar_type: 3
+    common.scan_line:  18
+    common.blind:      0.3
+    common.det_range:  40.0
 
-  # IEKF 参数
-  max_iteration: 4
-  filter_size_corner: 0.1   # 降采样体素尺寸 (m)
-  filter_size_map:    0.2
-  cube_side_length: 1000.0  # 局部地图边长 (m)
+    common.max_iteration:       4
+    common.filter_size_corner:  0.1
+    common.filter_size_map:     0.2
 
-  # IMU 噪声（MEMS 典型值，可根据实际标定结果调整）
-  imu_acc_n:  0.1          # 加速度计噪声密度 (m/s²/√Hz)
-  imu_gyr_n:  0.01         # 陀螺仪噪声密度 (rad/s/√Hz)
-  imu_acc_w:  0.001        # 加速度计随机游走 (m/s³/√Hz)
-  imu_gyr_w:  0.0001       # 陀螺仪随机游走 (rad/s²/√Hz)
-  imu_gravity: 9.80        # 重力加速度 (m/s²)
+    common.imu_acc_n:   0.1
+    common.imu_gyr_n:   0.01
+    common.imu_acc_w:   0.001
+    common.imu_gyr_w:   0.0001
+    common.imu_gravity: 9.80
 
-  # IMU ↔ LiDAR 外参（L1 内置 IMU，近似单位阵）
-  extrinsic_T: [0.0, 0.0, 0.0]
-  extrinsic_R: [1, 0, 0,
-                0, 1, 0,
-                0, 0, 1]
+    common.extrinsic_T: [0.0, 0.0, 0.0]
+    common.extrinsic_R: [1.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0,
+                         0.0, 0.0, 1.0]

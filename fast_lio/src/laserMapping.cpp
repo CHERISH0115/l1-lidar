@@ -4,11 +4,15 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <nav_msgs/msg/path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <pcl/impl/pcl_base.hpp>
+#include <pcl/filters/impl/voxel_grid.hpp>
+#include <pcl/filters/impl/filter.hpp>
 
 #include "common_lib.h"
 #include "so3_math.h"

@@ -153,8 +153,9 @@ void L1Parser::handle_dist(const uint8_t *p, double ts) {
     uint16_t pid = leu16(p);
     const uint8_t *point_data = p + 6;
 
-    // 如果辅助帧 packet_id 匹配，进行完整 XYZ 转换
-    if (aux_.valid && aux_.packet_id == pid) {
+    // 使用最近一次有效辅助帧进行 XYZ 转换（无需严格 packet_id 匹配）
+    (void)pid;
+    if (aux_.valid) {
         const float range_scale = 0.001f;
         const float z_bias      = 0.0445f;
         const int   N           = 120;

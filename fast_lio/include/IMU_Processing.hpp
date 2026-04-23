@@ -2,6 +2,7 @@
 // IMU 传播：前向积分 + 状态协方差传递
 #include "common_lib.h"
 #include "so3_math.h"
+#include <unsupported/Eigen/MatrixFunctions>
 #include <deque>
 
 struct ImuPropState {

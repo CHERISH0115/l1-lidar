@@ -5,7 +5,9 @@ set -e
 WORKSPACE="$(cd "$(dirname "$0")" && pwd)"
 RUNTIME_DIR="/run/user/$(id -u)"
 DRIVER_CTR="l1_driver"
-IMAGE="lidar-ros:latest"
+# 用 Dockerfile 的 SHA256 前8位做镜像 tag，Dockerfile 变更时自动重建
+DOCKER_HASH=$(sha256sum "$WORKSPACE/Dockerfile.lidar" | cut -c1-8)
+IMAGE="lidar-ros:${DOCKER_HASH}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
@@ -22,10 +24,13 @@ if [ ! -e /dev/ttyUSB0 ]; then
 fi
 info "雷达串口 /dev/ttyUSB0 已就绪"
 
-# ── 构建自定义镜像（首次约5分钟）────────────────────
+# ── 构建镜像（Dockerfile 变更时自动重建）────────────
 if ! docker image inspect $IMAGE &>/dev/null; then
-    info "首次运行，构建 Docker 镜像（约5分钟）..."
+    info "构建 Docker 镜像 ${IMAGE}（约5分钟）..."
     docker build -f "$WORKSPACE/Dockerfile.lidar" -t $IMAGE "$WORKSPACE" || error "镜像构建失败"
+    # 清理旧版本镜像（保留当前）
+    docker images lidar-ros --format "{{.Tag}}" | grep -v "${DOCKER_HASH}" | \
+        xargs -I{} docker rmi "lidar-ros:{}" 2>/dev/null || true
     info "镜像构建完成"
 fi
 
@@ -47,38 +52,14 @@ docker run -d --name $DRIVER_CTR \
     $IMAGE \
     sleep infinity
 
-# ── 编译 l1_driver ────────────────────────────────────
-if [ ! -d "$WORKSPACE/install/l1_driver" ]; then
-    info "编译 l1_driver（约30秒）..."
-    docker exec $DRIVER_CTR bash -c "
-        source /opt/ros/jazzy/setup.bash &&
-        cd /workspace &&
-        colcon build --packages-select l1_driver --cmake-args -DCMAKE_BUILD_TYPE=Release
-    "
-    info "编译完成"
-fi
-
-# ── 编译 fast_lio ─────────────────────────────────────
-if [ ! -d "$WORKSPACE/install/fast_lio" ]; then
-    info "编译 fast_lio（约2分钟）..."
-    docker exec $DRIVER_CTR bash -c "
-        source /opt/ros/jazzy/setup.bash &&
-        cd /workspace &&
-        colcon build --packages-select fast_lio --cmake-args -DCMAKE_BUILD_TYPE=Release
-    "
-    info "编译完成"
-fi
-
-# ── 编译 qt_visualizer ────────────────────────────────
-if [ ! -d "$WORKSPACE/install/qt_visualizer" ]; then
-    info "编译 qt_visualizer（约2分钟）..."
-    docker exec $DRIVER_CTR bash -c "
-        source /opt/ros/jazzy/setup.bash &&
-        cd /workspace &&
-        colcon build --packages-select qt_visualizer --cmake-args -DCMAKE_BUILD_TYPE=Release
-    "
-    info "编译完成"
-fi
+# ── 编译所有包（colcon 增量编译，只重建有变化的）─────
+info "编译工作空间..."
+docker exec $DRIVER_CTR bash -c "
+    source /opt/ros/jazzy/setup.bash &&
+    cd /workspace &&
+    colcon build --cmake-args -DCMAKE_BUILD_TYPE=Release
+" || error "编译失败，请检查上方错误"
+info "编译完成"
 
 # ── 启动雷达驱动 ──────────────────────────────────────
 info "启动 l1_driver 节点..."

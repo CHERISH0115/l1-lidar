@@ -35,7 +35,13 @@ target_include_directories(fast_lio_node PRIVATE
   ${EIGEN3_INCLUDE_DIR}
 )
 
-target_link_libraries(fast_lio_node ${PCL_LIBRARIES})
+target_link_libraries(fast_lio_node
+  ${PCL_LIBRARIES}
+  pcl_common
+  pcl_filters
+  pcl_io
+  pcl_kdtree
+)
 ament_target_dependencies(fast_lio_node ${DEPS})
 
 install(TARGETS fast_lio_node DESTINATION lib/${PROJECT_NAME})
