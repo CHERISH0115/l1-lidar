@@ -1,11 +1,19 @@
 FROM ros:jazzy-ros-base
 
 RUN apt-get update && apt-get install -y \
+    # Qt5 / Wayland 显示
     libqt5widgets5t64 \
     libqt5opengl5t64 \
     libqt5waylandclient5 \
     qtwayland5 \
     qtbase5-dev \
     libqt5opengl5-dev \
+    # FAST-LIO2 依赖
+    libeigen3-dev \
+    libpcl-dev \
+    ros-jazzy-pcl-ros \
+    ros-jazzy-pcl-conversions \
     ros-jazzy-tf2 \
+    ros-jazzy-tf2-ros \
+    ros-jazzy-tf2-geometry-msgs \
     && rm -rf /var/lib/apt/lists/*

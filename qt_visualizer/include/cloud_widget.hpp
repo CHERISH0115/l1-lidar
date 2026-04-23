@@ -14,10 +14,12 @@ public:
 
 public slots:
     void update_cloud(const std::vector<Point3D> &pts);
+    void add_trajectory_point(float x, float y, float z);
     void clear_map();
     void set_max_frames(int n);
     void reset_view();
     bool export_pcd(const QString &path);
+    void set_show_trajectory(bool v);
 
 public:
     int point_count() const { return int(cloud_.size()); }
@@ -32,10 +34,12 @@ protected:
 private:
     QMutex mutex_;
     std::vector<Point3D> cloud_;
+    std::vector<Point3D> trajectory_;   // 轨迹点列表（世界坐标）
+    bool show_trajectory_{true};
 
-    float azimuth_{225.0f};   // horizontal rotation (degrees)
-    float elevation_{30.0f};  // vertical tilt (degrees)
-    float scale_{80.0f};      // pixels per metre
+    float azimuth_{225.0f};
+    float elevation_{30.0f};
+    float scale_{80.0f};
     float z_min_{0.0f}, z_max_{1.0f};
     int   max_frames_{200};
 

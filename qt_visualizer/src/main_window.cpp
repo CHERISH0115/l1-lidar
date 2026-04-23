@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QMessageBox>
 #include <QDateTime>
+#include <cmath>
 
 static void style_btn(QPushButton *b, const QString &color) {
     b->setStyleSheet(QString(
@@ -22,15 +23,15 @@ static void style_btn(QPushButton *b, const QString &color) {
 
 MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     : QMainWindow(parent) {
-    setWindowTitle("L1 LiDAR Visualizer");
-    resize(1100, 720);
+    setWindowTitle("L1 LiDAR SLAM Visualizer");
+    resize(1200, 760);
 
-    // 整体深色主题
     setStyleSheet("QMainWindow,QWidget{background:#1a1a2e;color:#e0e0e0;}"
                   "QGroupBox{border:1px solid #3a3a5c;border-radius:6px;"
                   "          margin-top:10px;padding-top:8px;font-weight:bold;}"
                   "QGroupBox::title{subcontrol-origin:margin;left:10px;color:#7f8fff;}"
                   "QLabel{color:#c0c0d0;}"
+                  "QCheckBox{color:#c0c0d0;}"
                   "QSpinBox{background:#2a2a40;color:#e0e0e0;border:1px solid #4a4a6c;"
                   "         border-radius:4px;padding:4px;}");
 
@@ -45,7 +46,7 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
 
     // ── 右侧面板 ──────────────────────────────────────────
     auto *panel = new QWidget(this);
-    panel->setFixedWidth(200);
+    panel->setFixedWidth(210);
     panel->setStyleSheet("background:#13132a;border-radius:8px;");
     auto *pv = new QVBoxLayout(panel);
     pv->setContentsMargins(10,10,10,10);
@@ -53,38 +54,47 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     root_h->addWidget(panel);
 
     // 状态卡片
-    auto *grp = new QGroupBox("Status", panel);
+    auto *grp = new QGroupBox("SLAM Status", panel);
     auto *gv  = new QVBoxLayout(grp);
     gv->setSpacing(6);
     lbl_fps_    = new QLabel("FPS: --",    grp);
-    lbl_points_ = new QLabel("Points: --", grp);
-    lbl_status_ = new QLabel("Waiting...", grp);
+    lbl_points_ = new QLabel("Map pts: --", grp);
+    lbl_status_ = new QLabel("Waiting for SLAM...", grp);
     lbl_status_->setWordWrap(true);
     lbl_fps_->setStyleSheet("color:#7fff7f;font-size:14px;font-weight:bold;");
     lbl_points_->setStyleSheet("color:#7fbfff;font-size:13px;");
+    lbl_status_->setStyleSheet("color:#ffcf7f;font-size:12px;");
     gv->addWidget(lbl_fps_);
     gv->addWidget(lbl_points_);
     gv->addWidget(lbl_status_);
     pv->addWidget(grp);
 
-    // 积累帧数控制
-    auto *grp2 = new QGroupBox("Accumulation", panel);
+    // 地图密度控制
+    auto *grp2 = new QGroupBox("Map Density", panel);
     auto *g2v  = new QVBoxLayout(grp2);
-    g2v->addWidget(new QLabel("Frames (density):"));
+    g2v->addWidget(new QLabel("Max frames (buffer):"));
     spin_frames_ = new QSpinBox(grp2);
-    spin_frames_->setRange(10, 1000);
-    spin_frames_->setValue(200);
+    spin_frames_->setRange(100, 5000);
+    spin_frames_->setValue(500);
     spin_frames_->setSuffix(" fr");
     g2v->addWidget(spin_frames_);
     pv->addWidget(grp2);
+
+    // 显示控制
+    auto *grp4 = new QGroupBox("Display", panel);
+    auto *g4v  = new QVBoxLayout(grp4);
+    chk_traj_ = new QCheckBox("Show trajectory", grp4);
+    chk_traj_->setChecked(true);
+    g4v->addWidget(chk_traj_);
+    pv->addWidget(grp4);
 
     // 操作按钮
     auto *grp3 = new QGroupBox("Controls", panel);
     auto *g3v  = new QVBoxLayout(grp3);
     g3v->setSpacing(8);
-    btn_clear_ = new QPushButton("Clear Map", grp3);
-    btn_reset_ = new QPushButton("Reset View", grp3);
-    btn_export_= new QPushButton("Export PCD", grp3);
+    btn_clear_  = new QPushButton("Clear Map",   grp3);
+    btn_reset_  = new QPushButton("Reset View",  grp3);
+    btn_export_ = new QPushButton("Export PCD",  grp3);
     style_btn(btn_clear_,  "#c0392b");
     style_btn(btn_reset_,  "#2980b9");
     style_btn(btn_export_, "#27ae60");
@@ -93,8 +103,7 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     g3v->addWidget(btn_export_);
     pv->addWidget(grp3);
 
-    // 操作提示
-    auto *hint = new QLabel("Drag: rotate\nScroll: zoom", panel);
+    auto *hint = new QLabel("Drag: rotate\nScroll: zoom\nLeft btn: orbit", panel);
     hint->setStyleSheet("color:#606080;font-size:11px;");
     hint->setAlignment(Qt::AlignCenter);
     pv->addWidget(hint);
@@ -108,6 +117,8 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
 
     connect(ros_thread_, &QThread::started, ros_worker_,
             [this, argc, argv]() { ros_worker_->start_ros(argc, argv); });
+
+    // 注册点云 → 全局地图（FAST-LIO2 已在世界坐标系）
     connect(ros_worker_, &RosWorker::cloud_received,
             cloud_widget_, &CloudWidget::update_cloud,
             Qt::QueuedConnection);
@@ -115,11 +126,11 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
             this, [this](const std::vector<Point3D> &) {
                 frame_count_++;
             }, Qt::QueuedConnection);
+
+    // 里程计 → 轨迹点
     connect(ros_worker_, &RosWorker::pose_received,
-            this, [this](float x, float y, float yaw) {
-                lbl_status_->setText(QString("X:%1 Y:%2\nYaw:%3°")
-                    .arg(x,0,'f',2).arg(y,0,'f',2)
-                    .arg(yaw*180/M_PI,0,'f',1));
+            this, [this](float x, float y, float z, float /*yaw*/) {
+                cloud_widget_->add_trajectory_point(x, y, z);
             }, Qt::QueuedConnection);
     connect(ros_worker_, &RosWorker::status_received,
             lbl_status_, &QLabel::setText, Qt::QueuedConnection);
@@ -129,6 +140,8 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     connect(btn_export_, &QPushButton::clicked, this, &MainWindow::on_export_clicked);
     connect(spin_frames_, QOverload<int>::of(&QSpinBox::valueChanged),
             cloud_widget_, &CloudWidget::set_max_frames);
+    connect(chk_traj_, &QCheckBox::toggled,
+            cloud_widget_, &CloudWidget::set_show_trajectory);
 
     fps_timer_ = new QTimer(this);
     connect(fps_timer_, &QTimer::timeout, this, &MainWindow::update_fps);
@@ -145,10 +158,10 @@ MainWindow::~MainWindow() {
 }
 
 void MainWindow::on_export_clicked() {
-    QString default_name = QString("scan_%1.pcd")
+    QString default_name = QString("map_%1.pcd")
         .arg(QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss"));
     QString path = QFileDialog::getSaveFileName(
-        this, "Export Point Cloud", QDir::homePath() + "/" + default_name,
+        this, "Export Map", QDir::homePath() + "/" + default_name,
         "PCD Files (*.pcd);;All Files (*)");
     if (path.isEmpty()) return;
 
@@ -169,12 +182,12 @@ void MainWindow::on_export_clicked() {
             "No points to export or file write error.");
 }
 
-void MainWindow::on_clear_clicked()      { cloud_widget_->clear_map(); }
-void MainWindow::on_reset_view_clicked() { cloud_widget_->reset_view(); }
+void MainWindow::on_clear_clicked()           { cloud_widget_->clear_map(); }
+void MainWindow::on_reset_view_clicked()      { cloud_widget_->reset_view(); }
 void MainWindow::on_max_frames_changed(int v) { cloud_widget_->set_max_frames(v); }
 
 void MainWindow::update_fps() {
     lbl_fps_->setText(QString("FPS: %1").arg(frame_count_));
-    lbl_points_->setText(QString("Points: %1").arg(cloud_widget_->point_count()));
+    lbl_points_->setText(QString("Map pts: %1").arg(cloud_widget_->point_count()));
     frame_count_ = 0;
 }

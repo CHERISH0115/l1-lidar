@@ -11,9 +11,8 @@ CloudWidget::CloudWidget(QWidget *parent) : QWidget(parent) {
     setMinimumSize(600, 500);
 }
 
-// Orbital projection: rotate world by azimuth then elevation, then orthographic
 QPointF CloudWidget::project(float wx, float wy, float wz) const {
-    float az = azimuth_ * float(M_PI) / 180.0f;
+    float az = azimuth_   * float(M_PI) / 180.0f;
     float el = elevation_ * float(M_PI) / 180.0f;
 
     float x1 =  wx * cosf(az) + wy * sinf(az);
@@ -30,6 +29,11 @@ QPointF CloudWidget::project(float wx, float wy, float wz) const {
 void CloudWidget::set_max_frames(int n) {
     QMutexLocker lk(&mutex_);
     max_frames_ = n;
+}
+
+void CloudWidget::set_show_trajectory(bool v) {
+    show_trajectory_ = v;
+    update();
 }
 
 void CloudWidget::reset_view() {
@@ -66,10 +70,12 @@ bool CloudWidget::export_pcd(const QString &path) {
     return f.good();
 }
 
+// 全局地图：直接累积注册点云（已在世界坐标系，无需限帧数）
 void CloudWidget::update_cloud(const std::vector<Point3D> &pts) {
     QMutexLocker lk(&mutex_);
-    // 滚动缓冲：保留最近 N 帧
     cloud_.insert(cloud_.end(), pts.begin(), pts.end());
+
+    // 限制点数上限（约 500 帧 × 120 点）
     constexpr size_t PTS_PER_FRAME = 120;
     size_t max_pts = size_t(max_frames_) * PTS_PER_FRAME;
     if (cloud_.size() > max_pts)
@@ -85,9 +91,16 @@ void CloudWidget::update_cloud(const std::vector<Point3D> &pts) {
     update();
 }
 
+void CloudWidget::add_trajectory_point(float x, float y, float z) {
+    QMutexLocker lk(&mutex_);
+    trajectory_.push_back({x, y, z, 0.0f});
+    update();
+}
+
 void CloudWidget::clear_map() {
     QMutexLocker lk(&mutex_);
     cloud_.clear();
+    trajectory_.clear();
     update();
 }
 
@@ -108,36 +121,43 @@ void CloudWidget::paintEvent(QPaintEvent *) {
     }
 
     // 坐标轴
-    p.setPen(QPen(Qt::red, 2));   p.drawLine(project(0,0,0), project(1,0,0));
+    p.setPen(QPen(Qt::red,   2)); p.drawLine(project(0,0,0), project(1,0,0));
     p.setPen(QPen(Qt::green, 2)); p.drawLine(project(0,0,0), project(0,1,0));
-    p.setPen(QPen(Qt::blue, 2));  p.drawLine(project(0,0,0), project(0,0,1));
+    p.setPen(QPen(Qt::blue,  2)); p.drawLine(project(0,0,0), project(0,0,1));
 
     // 点云：按Z高度着色 (蓝→青→绿→黄→红)
     float zrange = (z_max_ > z_min_) ? (z_max_ - z_min_) : 1.0f;
     for (const auto &pt : cloud_) {
         float t = std::clamp((pt.z - z_min_) / zrange, 0.0f, 1.0f);
         int r, g, b;
-        if (t < 0.25f) {
-            float s = t / 0.25f;
-            r = 0; g = int(255 * s); b = 255;
-        } else if (t < 0.5f) {
-            float s = (t - 0.25f) / 0.25f;
-            r = 0; g = 255; b = int(255 * (1 - s));
-        } else if (t < 0.75f) {
-            float s = (t - 0.5f) / 0.25f;
-            r = int(255 * s); g = 255; b = 0;
-        } else {
-            float s = (t - 0.75f) / 0.25f;
-            r = 255; g = int(255 * (1 - s)); b = 0;
-        }
-        auto s = project(pt.x, pt.y, pt.z);
-        p.fillRect(QRectF(s.x() - 1.5, s.y() - 1.5, 3, 3), QColor(r, g, b));
+        if      (t < 0.25f) { float s=t/0.25f;        r=0;         g=int(255*s); b=255; }
+        else if (t < 0.5f)  { float s=(t-0.25f)/0.25f;r=0;         g=255;        b=int(255*(1-s)); }
+        else if (t < 0.75f) { float s=(t-0.5f)/0.25f; r=int(255*s);g=255;        b=0; }
+        else                { float s=(t-0.75f)/0.25f; r=255;       g=int(255*(1-s)); b=0; }
+        auto sc = project(pt.x, pt.y, pt.z);
+        p.fillRect(QRectF(sc.x()-1.5, sc.y()-1.5, 3, 3), QColor(r,g,b));
     }
 
-    // 提示文字
+    // 轨迹：红色折线 + 当前位置圆点
+    if (show_trajectory_ && trajectory_.size() >= 2) {
+        p.setPen(QPen(QColor(255, 60, 60), 2));
+        for (size_t i = 1; i < trajectory_.size(); ++i) {
+            auto &a = trajectory_[i-1];
+            auto &b2 = trajectory_[i];
+            p.drawLine(project(a.x, a.y, a.z), project(b2.x, b2.y, b2.z));
+        }
+        // 当前位置：白色圆点
+        auto &cur = trajectory_.back();
+        auto sc = project(cur.x, cur.y, cur.z);
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(255, 255, 255));
+        p.drawEllipse(sc, 5.0, 5.0);
+    }
+
+    // HUD
     p.setPen(QColor(120, 120, 140));
-    p.drawText(8, 18, QString("Points: %1  Drag: rotate  Scroll: zoom")
-               .arg(cloud_.size()));
+    p.drawText(8, 18, QString("Map pts: %1  Traj: %2  Drag:rotate  Scroll:zoom")
+               .arg(cloud_.size()).arg(trajectory_.size()));
 }
 
 void CloudWidget::wheelEvent(QWheelEvent *e) {
@@ -148,7 +168,7 @@ void CloudWidget::wheelEvent(QWheelEvent *e) {
 
 void CloudWidget::mousePressEvent(QMouseEvent *e) {
     if (e->button() == Qt::LeftButton) {
-        rotating_ = true;
+        rotating_  = true;
         last_mouse_ = e->pos();
     }
 }

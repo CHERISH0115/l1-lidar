@@ -1,6 +1,6 @@
-# L1 LiDAR Visualizer
+# L1 LiDAR SLAM Visualizer
 
-基于 **宇树 L1 激光雷达 + 树莓派 + ROS2 Jazzy + Qt5** 的点云采集与实时可视化系统。
+基于 **宇树 L1 激光雷达 + 树莓派 + ROS2 Jazzy + FAST-LIO2 + Qt5** 的实时 LiDAR-IMU 紧耦合 SLAM 系统。
 通过 Docker 容器化部署，一键启动，无需手动配置 ROS2 环境。
 
 ---
@@ -9,10 +9,22 @@
 
 ```
 宇树 L1 雷达 ──/dev/ttyUSB0──> l1_driver (ROS2节点)
-                                      │ /scan (PointCloud2)
-                                      ▼
-                              qt_visualizer (Qt5 GUI)
-                              3D 点云实时渲染 + PCD导出
+                                    │
+                     ┌──────────────┴──────────────┐
+                     │ /scan (PointCloud2+time)     │ /imu/data_raw (Imu)
+                     └──────────────┬──────────────┘
+                                    ▼
+                              FAST-LIO2 (SLAM)
+                         IEKF + IKD-tree 建图
+                         LiDAR-IMU 紧耦合融合
+                                    │
+                     ┌──────────────┴──────────────┐
+                     │ /cloud_registered            │ /Odometry
+                     │ (全局注册点云)               │ (位置+姿态)
+                     └──────────────┬──────────────┘
+                                    ▼
+                            qt_visualizer (Qt5 GUI)
+                        全局地图实时渲染 + 运动轨迹 + PCD导出
 ```
 
 ---
@@ -21,32 +33,46 @@
 
 ```
 code/
-├── Dockerfile.lidar        # 自定义 Docker 镜像（含 Qt5 + ROS2 Jazzy）
+├── Dockerfile.lidar        # 自定义 Docker 镜像（Qt5 + ROS2 Jazzy + PCL）
 ├── start_lidar.sh          # 一键启动脚本
 ├── l1_driver/              # ROS2 宇树L1雷达驱动包
 │   ├── include/l1_driver/
 │   │   └── l1_parser.hpp       # 串口协议解析（MAVLink v2）
-│   ├── src/
-│   │   ├── l1_parser.cpp
-│   │   └── l1_driver_node.cpp  # 串口读取 → /scan 发布
-│   └── launch/
-│       └── l1_driver.launch.py
-├── qt_visualizer/          # C++/Qt5 点云可视化界面
+│   └── src/
+│       ├── l1_parser.cpp
+│       └── l1_driver_node.cpp  # 串口读取 → /scan + /imu/data_raw 发布
+├── fast_lio/               # FAST-LIO2 SLAM 包（LiDAR-IMU 紧耦合）
+│   ├── config/
+│   │   └── l1_lidar.yaml       # L1 专用参数（IMU噪声、外参、IEKF配置）
+│   ├── launch/
+│   │   └── fast_lio.launch.py
 │   ├── include/
-│   │   ├── cloud_widget.hpp    # 3D 点云渲染控件（轨道相机）
-│   │   ├── ros_worker.hpp      # ROS2 后台订阅线程
+│   │   ├── common_lib.h        # 状态向量、点类型定义
+│   │   ├── so3_math.h          # SO(3) 李群数学
+│   │   ├── IMU_Processing.hpp  # IMU积分、去畸变、协方差传播
+│   │   ├── preprocess.h        # 点云预处理头文件
+│   │   └── ikd-Tree/
+│   │       └── ikd_Tree.h      # 增量式KD-tree
+│   └── src/
+│       ├── ikd_Tree.cpp        # IKD-tree 实现
+│       ├── preprocess.cpp      # 标准PointCloud2适配
+│       └── laserMapping.cpp    # SLAM主节点（IEKF + 点到面配准）
+├── qt_visualizer/          # C++/Qt5 SLAM可视化界面
+│   ├── include/
+│   │   ├── cloud_widget.hpp    # 3D点云渲染（全局地图 + 轨迹）
+│   │   ├── ros_worker.hpp      # ROS2后台订阅线程
 │   │   └── main_window.hpp     # 主窗口
 │   └── src/
 │       ├── main.cpp
 │       ├── main_window.cpp
 │       ├── cloud_widget.cpp
 │       └── ros_worker.cpp
-├── stm32_remote/           # STM32 遥控终端（HAL库）
-│   └── Core/
-│       ├── Inc/  (lora.h / oled.h / key.h)
-│       └── Src/  (main.c / lora.c / oled.c / key.c)
-└── lora_bridge/            # 树莓派端 LoRa 桥接 ROS2 节点
-    └── src/lora_bridge_node.cpp
+├── lora_bridge/            # 树莓派端 LoRa 桥接 ROS2 节点
+│   └── src/lora_bridge_node.cpp
+└── stm32_remote/           # STM32 遥控终端（HAL库）
+    └── Core/
+        ├── Inc/  (lora.h / oled.h / key.h)
+        └── Src/  (main.c / lora.c / oled.c / key.c)
 ```
 
 ---
@@ -58,7 +84,7 @@ cd ~/WYF/code
 bash start_lidar.sh
 ```
 
-脚本自动完成：构建 Docker 镜像 → 编译 ROS2 包 → 启动驱动和 Qt 界面。
+脚本自动完成：构建 Docker 镜像 → 编译所有 ROS2 包 → 启动驱动 + SLAM + Qt 界面。
 
 ---
 
@@ -104,13 +130,8 @@ docker run --rm hello-world
 ### 第二步：安装 Git 并克隆项目
 
 ```bash
-# 安装 git（Ubuntu 通常已预装）
 sudo apt install -y git
-
-# 克隆项目
 git clone https://github.com/CHERISH0115/l1-lidar.git
-
-# 进入项目目录
 cd l1-lidar
 ```
 
@@ -136,10 +157,7 @@ ls -l /dev/ttyUSB0
 
 ### 第四步：确认 Wayland 环境
 
-Qt 界面通过 Wayland 显示，Ubuntu 24.04 默认已是 Wayland 会话。
-
 ```bash
-# 验证当前会话类型
 echo $XDG_SESSION_TYPE
 # 输出应为 wayland
 ```
@@ -158,9 +176,10 @@ bash start_lidar.sh
 
 | 步骤 | 说明 | 耗时 |
 |------|------|------|
-| 构建 Docker 镜像 | 安装 Qt5 + ROS2 依赖 | 约 3 分钟 |
+| 构建 Docker 镜像 | 安装 Qt5 + ROS2 + PCL 依赖 | 约 5 分钟 |
 | 编译 l1_driver | ROS2 串口驱动包 | 约 30 秒 |
-| 编译 qt_visualizer | Qt5 点云界面 | 约 2 分钟 |
+| 编译 fast_lio | FAST-LIO2 SLAM 包 | 约 2 分钟 |
+| 编译 qt_visualizer | Qt5 可视化界面 | 约 2 分钟 |
 
 **后续运行**直接秒启，无需重新编译。
 
@@ -168,18 +187,36 @@ bash start_lidar.sh
 
 ### 第六步：使用 Qt 界面
 
-Qt 窗口启动后即开始实时显示点云：
+Qt 窗口启动后，等待 SLAM 初始化（约 2~3 秒静止时间用于 IMU 对齐重力），随后开始实时建图：
 
 | 操作 | 功能 |
 |------|------|
 | 鼠标左键拖拽 | 旋转 3D 视角 |
 | 滚轮 | 缩放 |
-| Frames 数值框 | 调整点云密度（帧缓冲数，默认200帧）|
-| **Clear Map** | 清除当前点云 |
+| **Show trajectory** 复选框 | 显示/隐藏运动轨迹（红线）|
+| Frames 数值框 | 调整地图点数上限（缓冲帧数）|
+| **Clear Map** | 清除当前地图和轨迹 |
 | **Reset View** | 恢复默认视角 |
-| **Export PCD** | 导出当前点云为 `.pcd` 文件 |
+| **Export PCD** | 导出当前全局地图为 `.pcd` 文件 |
 
 导出的 `.pcd` 文件可用 [CloudCompare](https://www.cloudcompare.org/) 打开进一步处理。
+
+---
+
+## FAST-LIO2 参数调整
+
+编辑 `fast_lio/config/l1_lidar.yaml` 后重新编译（`rm -rf install/fast_lio && bash start_lidar.sh`）：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `blind` | 0.3 m | 近距离盲区，过小会引入噪声 |
+| `det_range` | 40.0 m | 最大探测距离 |
+| `filter_size_corner` | 0.1 m | 扫描点降采样体素尺寸 |
+| `filter_size_map` | 0.2 m | 地图体素尺寸，越小地图越密 |
+| `max_iteration` | 4 | IEKF 最大迭代次数 |
+| `imu_acc_n` | 0.1 | 加速度计噪声密度（标定后替换）|
+| `imu_gyr_n` | 0.01 | 陀螺仪噪声密度（标定后替换）|
+| `extrinsic_R/T` | 单位阵/零 | IMU ↔ LiDAR 外参（L1 内置 IMU 近似单位阵）|
 
 ---
 
@@ -188,30 +225,41 @@ Qt 窗口启动后即开始实时显示点云：
 ### Qt 窗口不显示
 
 ```bash
-# 确认 Wayland 会话
 echo $XDG_SESSION_TYPE   # 应为 wayland
-
-# 确认 wayland socket 存在
 ls /run/user/$(id -u)/wayland-0
 ```
 
 ### 找不到 /dev/ttyUSB0
 
 ```bash
-# 检查内核是否识别到设备
 dmesg | grep tty | tail -10
-
-# 临时授权（重启后失效）
-sudo chmod 666 /dev/ttyUSB0
+sudo chmod 666 /dev/ttyUSB0   # 临时授权
 ```
 
-### 点云界面无数据
+### SLAM 不收敛 / 漂移严重
 
 ```bash
-# 进入容器检查驱动是否正常发布
+# 检查 IMU 数据是否正常
+docker exec -it l1_driver bash -c \
+  "source /opt/ros/jazzy/setup.bash && ros2 topic hz /imu/data_raw"
+# 正常应为 ~200 Hz
+
+# 检查点云是否正常
 docker exec -it l1_driver bash -c \
   "source /opt/ros/jazzy/setup.bash && ros2 topic hz /scan"
-# 正常应显示 10 Hz 左右的频率
+# 正常应为 ~10 Hz
+```
+
+启动时保持传感器**静止 2~3 秒**，等待 IMU 重力方向初始化完成。
+
+### 点云界面无数据（无建图输出）
+
+```bash
+# 确认 FAST-LIO2 正在发布里程计
+docker exec -it l1_driver bash -c \
+  "source /opt/ros/jazzy/setup.bash && source /workspace/install/setup.bash && \
+   ros2 topic hz /Odometry"
+# 正常应为 ~10 Hz
 ```
 
 ### 重新编译（代码更新后）
@@ -225,18 +273,22 @@ bash start_lidar.sh
 
 ```bash
 docker rmi lidar-ros:latest
-bash start_lidar.sh   # 会自动重新构建
+bash start_lidar.sh   # 自动重新构建
 ```
 
 ---
 
 ## 话题说明
 
-| 话题 | 类型 | 说明 |
-|------|------|------|
-| `/scan` | `sensor_msgs/PointCloud2` | 雷达原始点云（主话题）|
-| `/imu/data_raw` | `sensor_msgs/Imu` | IMU 原始数据 |
-| `/Odometry` | `nav_msgs/Odometry` | 里程计输出 |
+| 话题 | 类型 | 发布节点 | 说明 |
+|------|------|----------|------|
+| `/scan` | `sensor_msgs/PointCloud2` | l1_driver | 原始点云（含每点时间戳 `time` 字段）|
+| `/imu/data_raw` | `sensor_msgs/Imu` | l1_driver | IMU 原始数据（~200 Hz）|
+| `/Odometry` | `nav_msgs/Odometry` | fast_lio | SLAM 位姿估计（世界坐标系）|
+| `/cloud_registered` | `sensor_msgs/PointCloud2` | fast_lio | 已注册全局点云（世界坐标系）|
+| `/trajectory` | `nav_msgs/Path` | fast_lio | 运动轨迹历史路径 |
+| `/slam/start` | `std_msgs/Bool` | lora_bridge | LoRa 遥控启动 SLAM |
+| `/slam/stop` | `std_msgs/Bool` | lora_bridge | LoRa 遥控停止 SLAM |
 
 ---
 

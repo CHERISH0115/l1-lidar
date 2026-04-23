@@ -2,6 +2,7 @@
 #include <QMainWindow>
 #include <QLabel>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QTimer>
 #include <QSpinBox>
 #include "cloud_widget.hpp"
@@ -29,6 +30,7 @@ private:
     QPushButton  *btn_clear_;
     QPushButton  *btn_reset_;
     QPushButton  *btn_export_;
+    QCheckBox    *chk_traj_;
     QSpinBox     *spin_frames_;
 
     RosWorker  *ros_worker_;

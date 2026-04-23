@@ -1,5 +1,5 @@
 #!/bin/bash
-# 宇树 L1 雷达一键启动脚本
+# 宇树 L1 雷达 SLAM 一键启动脚本（FAST-LIO2 + Qt 全局地图）
 set -e
 
 WORKSPACE="$(cd "$(dirname "$0")" && pwd)"
@@ -13,7 +13,7 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
 echo "================================================"
-echo "       宇树 L1 LiDAR 启动脚本"
+echo "   宇树 L1 LiDAR SLAM 启动脚本 (FAST-LIO2)"
 echo "================================================"
 
 # ── 检查串口 ─────────────────────────────────────────
@@ -22,9 +22,9 @@ if [ ! -e /dev/ttyUSB0 ]; then
 fi
 info "雷达串口 /dev/ttyUSB0 已就绪"
 
-# ── 构建自定义镜像（首次约3分钟）────────────────────
+# ── 构建自定义镜像（首次约5分钟）────────────────────
 if ! docker image inspect $IMAGE &>/dev/null; then
-    info "首次运行，构建 Docker 镜像（约3分钟）..."
+    info "首次运行，构建 Docker 镜像（约5分钟）..."
     docker build -f "$WORKSPACE/Dockerfile.lidar" -t $IMAGE "$WORKSPACE" || error "镜像构建失败"
     info "镜像构建完成"
 fi
@@ -47,9 +47,9 @@ docker run -d --name $DRIVER_CTR \
     $IMAGE \
     sleep infinity
 
-# ── 首次编译 l1_driver ────────────────────────────────
+# ── 编译 l1_driver ────────────────────────────────────
 if [ ! -d "$WORKSPACE/install/l1_driver" ]; then
-    info "首次运行，编译 l1_driver（约30秒）..."
+    info "编译 l1_driver（约30秒）..."
     docker exec $DRIVER_CTR bash -c "
         source /opt/ros/jazzy/setup.bash &&
         cd /workspace &&
@@ -58,9 +58,20 @@ if [ ! -d "$WORKSPACE/install/l1_driver" ]; then
     info "编译完成"
 fi
 
-# ── 首次编译 qt_visualizer ────────────────────────────
+# ── 编译 fast_lio ─────────────────────────────────────
+if [ ! -d "$WORKSPACE/install/fast_lio" ]; then
+    info "编译 fast_lio（约2分钟）..."
+    docker exec $DRIVER_CTR bash -c "
+        source /opt/ros/jazzy/setup.bash &&
+        cd /workspace &&
+        colcon build --packages-select fast_lio --cmake-args -DCMAKE_BUILD_TYPE=Release
+    "
+    info "编译完成"
+fi
+
+# ── 编译 qt_visualizer ────────────────────────────────
 if [ ! -d "$WORKSPACE/install/qt_visualizer" ]; then
-    info "首次运行，编译 qt_visualizer（约2分钟）..."
+    info "编译 qt_visualizer（约2分钟）..."
     docker exec $DRIVER_CTR bash -c "
         source /opt/ros/jazzy/setup.bash &&
         cd /workspace &&
@@ -69,7 +80,7 @@ if [ ! -d "$WORKSPACE/install/qt_visualizer" ]; then
     info "编译完成"
 fi
 
-# ── 启动驱动节点 ──────────────────────────────────────
+# ── 启动雷达驱动 ──────────────────────────────────────
 info "启动 l1_driver 节点..."
 docker exec -d $DRIVER_CTR bash -c "
     source /opt/ros/jazzy/setup.bash &&
@@ -79,8 +90,18 @@ docker exec -d $DRIVER_CTR bash -c "
 
 sleep 2
 
-# ── 启动 Qt 可视化（前台，显示在桌面）────────────────
-info "启动 Qt 点云可视化窗口..."
+# ── 启动 FAST-LIO2 SLAM ───────────────────────────────
+info "启动 FAST-LIO2 SLAM 节点..."
+docker exec -d $DRIVER_CTR bash -c "
+    source /opt/ros/jazzy/setup.bash &&
+    source /workspace/install/setup.bash &&
+    ros2 launch fast_lio fast_lio.launch.py
+"
+
+sleep 1
+
+# ── 启动 Qt 可视化（前台）────────────────────────────
+info "启动 Qt 全局地图可视化窗口..."
 docker exec $DRIVER_CTR bash -c "
     source /opt/ros/jazzy/setup.bash &&
     source /workspace/install/setup.bash &&
@@ -92,7 +113,8 @@ QT_PID=$!
 echo ""
 echo "================================================"
 info "全部服务已启动！"
-echo "  Qt 窗口点击 Start 按钮开始显示点云"
+echo "  数据流: l1_driver → FAST-LIO2 → Qt 全局地图"
+echo "  Qt 窗口实时显示建图结果和运动轨迹"
 echo "  按 Ctrl+C 停止所有服务"
 echo "================================================"
 

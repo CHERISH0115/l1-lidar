@@ -54,23 +54,27 @@ private:
         msg->is_dense = true;
 
         sensor_msgs::PointCloud2Modifier mod(*msg);
-        mod.setPointCloud2Fields(4,
+        mod.setPointCloud2Fields(5,
             "x", 1, sensor_msgs::msg::PointField::FLOAT32,
             "y", 1, sensor_msgs::msg::PointField::FLOAT32,
             "z", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "intensity", 1, sensor_msgs::msg::PointField::FLOAT32);
+            "intensity", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "time", 1, sensor_msgs::msg::PointField::FLOAT32);
         mod.resize(frame.points.size());
 
         sensor_msgs::PointCloud2Iterator<float> it_x(*msg, "x");
         sensor_msgs::PointCloud2Iterator<float> it_y(*msg, "y");
         sensor_msgs::PointCloud2Iterator<float> it_z(*msg, "z");
         sensor_msgs::PointCloud2Iterator<float> it_i(*msg, "intensity");
+        sensor_msgs::PointCloud2Iterator<float> it_t(*msg, "time");
 
+        double t0 = frame.points.empty() ? frame.timestamp : frame.points[0].timestamp;
         for (const auto &pt : frame.points) {
             *it_x = pt.x; ++it_x;
             *it_y = pt.y; ++it_y;
             *it_z = pt.z; ++it_z;
             *it_i = pt.intensity; ++it_i;
+            *it_t = static_cast<float>(pt.timestamp - t0); ++it_t;
         }
 
         pc_pub_->publish(std::move(msg));
