@@ -13,6 +13,7 @@ find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(Qt5 REQUIRED COMPONENTS Widgets OpenGL)
+find_package(OpenGL REQUIRED)
 
 add_executable(qt_visualizer_node
     src/main.cpp
@@ -30,7 +31,7 @@ ament_target_dependencies(qt_visualizer_node
     rclcpp sensor_msgs nav_msgs std_msgs tf2)
 
 target_link_libraries(qt_visualizer_node
-    Qt5::Widgets Qt5::OpenGL)
+    Qt5::Widgets Qt5::OpenGL ${OPENGL_gl_LIBRARY})
 
 install(TARGETS qt_visualizer_node DESTINATION lib/${PROJECT_NAME})
 

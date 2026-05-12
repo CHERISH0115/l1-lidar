@@ -72,11 +72,11 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     // 地图密度控制
     auto *grp2 = new QGroupBox("Map Density", panel);
     auto *g2v  = new QVBoxLayout(grp2);
-    g2v->addWidget(new QLabel("Max frames (buffer):"));
+    g2v->addWidget(new QLabel("Max points (x1000):"));
     spin_frames_ = new QSpinBox(grp2);
-    spin_frames_->setRange(100, 5000);
-    spin_frames_->setValue(500);
-    spin_frames_->setSuffix(" fr");
+    spin_frames_->setRange(100, 3000);
+    spin_frames_->setValue(600);
+    spin_frames_->setSuffix(" k");
     g2v->addWidget(spin_frames_);
     pv->addWidget(grp2);
 
@@ -139,7 +139,7 @@ MainWindow::MainWindow(int argc, char **argv, QWidget *parent)
     connect(btn_reset_,  &QPushButton::clicked, cloud_widget_, &CloudWidget::reset_view);
     connect(btn_export_, &QPushButton::clicked, this, &MainWindow::on_export_clicked);
     connect(spin_frames_, QOverload<int>::of(&QSpinBox::valueChanged),
-            cloud_widget_, &CloudWidget::set_max_frames);
+            cloud_widget_, &CloudWidget::set_max_points);
     connect(chk_traj_, &QCheckBox::toggled,
             cloud_widget_, &CloudWidget::set_show_trajectory);
 
@@ -184,7 +184,6 @@ void MainWindow::on_export_clicked() {
 
 void MainWindow::on_clear_clicked()           { cloud_widget_->clear_map(); }
 void MainWindow::on_reset_view_clicked()      { cloud_widget_->reset_view(); }
-void MainWindow::on_max_frames_changed(int v) { cloud_widget_->set_max_frames(v); }
 
 void MainWindow::update_fps() {
     lbl_fps_->setText(QString("FPS: %1").arg(frame_count_));

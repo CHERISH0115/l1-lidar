@@ -9,6 +9,7 @@
 #include <thread>
 #include <memory>
 #include <string>
+#include <vector>
 
 class L1DriverNode : public rclcpp::Node {
 public:
@@ -17,9 +18,13 @@ public:
         declare_parameter("baudrate", 2000000);
         declare_parameter("lidar_frame", std::string("lidar_link"));
         declare_parameter("imu_frame",   std::string("imu_link"));
+        declare_parameter("scan_period_sec", 0.1);   // 累积窗口，默认 100ms → 10 Hz
+        declare_parameter("max_points_per_scan", 8192);
 
         auto port     = get_parameter("serial_port").as_string();
         auto baudrate = get_parameter("baudrate").as_int();
+        scan_period_  = get_parameter("scan_period_sec").as_double();
+        max_pts_      = static_cast<size_t>(get_parameter("max_points_per_scan").as_int());
 
         lidar_frame_ = get_parameter("lidar_frame").as_string();
         imu_frame_   = get_parameter("imu_frame").as_string();
@@ -27,16 +32,19 @@ public:
         pc_pub_  = create_publisher<sensor_msgs::msg::PointCloud2>("/scan", 10);
         imu_pub_ = create_publisher<sensor_msgs::msg::Imu>("/imu/data_raw", 10);
 
+        acc_.reserve(max_pts_);
+
         parser_ = std::make_unique<L1Parser>(port, baudrate);
         parser_->set_pointcloud_callback(
-            [this](const PointCloudFrame &f) { publish_pointcloud(f); });
+            [this](const PointCloudFrame &f) { on_parser_points(f); });
         parser_->set_imu_callback(
             [this](const ImuFrame &f) { publish_imu(f); });
 
         spin_thread_ = std::thread([this] { parser_->spin(); });
 
-        RCLCPP_INFO(get_logger(), "L1 driver node started on %s @ %d baud",
-                    port.c_str(), (int)baudrate);
+        RCLCPP_INFO(get_logger(),
+                    "L1 driver started on %s @ %d baud (scan_period=%.3fs)",
+                    port.c_str(), (int)baudrate, scan_period_);
     }
 
     ~L1DriverNode() {
@@ -45,22 +53,44 @@ public:
     }
 
 private:
-    void publish_pointcloud(const PointCloudFrame &frame) {
+    // 累积 parser 的小帧到一个完整扫描周期再发布
+    void on_parser_points(const PointCloudFrame &f) {
+        if (f.points.empty()) return;
+
+        if (acc_.empty()) {
+            acc_start_ts_ = f.timestamp;
+        }
+
+        // 防止异常情况下无限累积
+        if (acc_.size() + f.points.size() > max_pts_) {
+            flush_scan();
+            acc_start_ts_ = f.timestamp;
+        }
+        acc_.insert(acc_.end(), f.points.begin(), f.points.end());
+
+        if (f.timestamp - acc_start_ts_ >= scan_period_) {
+            flush_scan();
+        }
+    }
+
+    void flush_scan() {
+        if (acc_.empty()) return;
+
         auto msg = std::make_unique<sensor_msgs::msg::PointCloud2>();
-        msg->header.stamp    = rclcpp::Time(static_cast<uint64_t>(frame.timestamp * 1e9));
+        msg->header.stamp    = rclcpp::Time(static_cast<uint64_t>(acc_start_ts_ * 1e9));
         msg->header.frame_id = lidar_frame_;
-        msg->height = 1;
-        msg->width  = static_cast<uint32_t>(frame.points.size());
+        msg->height   = 1;
+        msg->width    = static_cast<uint32_t>(acc_.size());
         msg->is_dense = true;
 
         sensor_msgs::PointCloud2Modifier mod(*msg);
         mod.setPointCloud2Fields(5,
-            "x", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "y", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+            "x",         1, sensor_msgs::msg::PointField::FLOAT32,
+            "y",         1, sensor_msgs::msg::PointField::FLOAT32,
+            "z",         1, sensor_msgs::msg::PointField::FLOAT32,
             "intensity", 1, sensor_msgs::msg::PointField::FLOAT32,
-            "time", 1, sensor_msgs::msg::PointField::FLOAT32);
-        mod.resize(frame.points.size());
+            "time",      1, sensor_msgs::msg::PointField::FLOAT32);
+        mod.resize(acc_.size());
 
         sensor_msgs::PointCloud2Iterator<float> it_x(*msg, "x");
         sensor_msgs::PointCloud2Iterator<float> it_y(*msg, "y");
@@ -68,16 +98,16 @@ private:
         sensor_msgs::PointCloud2Iterator<float> it_i(*msg, "intensity");
         sensor_msgs::PointCloud2Iterator<float> it_t(*msg, "time");
 
-        double t0 = frame.points.empty() ? frame.timestamp : frame.points[0].timestamp;
-        for (const auto &pt : frame.points) {
-            *it_x = pt.x; ++it_x;
-            *it_y = pt.y; ++it_y;
-            *it_z = pt.z; ++it_z;
-            *it_i = pt.intensity; ++it_i;
-            *it_t = static_cast<float>(pt.timestamp - t0); ++it_t;
+        for (const auto &pt : acc_) {
+            *it_x = pt.x;        ++it_x;
+            *it_y = pt.y;        ++it_y;
+            *it_z = pt.z;        ++it_z;
+            *it_i = pt.intensity;++it_i;
+            *it_t = static_cast<float>(pt.timestamp - acc_start_ts_); ++it_t;
         }
 
         pc_pub_->publish(std::move(msg));
+        acc_.clear();
     }
 
     void publish_imu(const ImuFrame &f) {
@@ -93,7 +123,6 @@ private:
         msg->angular_velocity.y = f.gyro_y;
         msg->angular_velocity.z = f.gyro_z;
 
-        // 协方差设为对角阵（噪声参数可从雷达手册获取）
         msg->linear_acceleration_covariance[0] = 0.01;
         msg->linear_acceleration_covariance[4] = 0.01;
         msg->linear_acceleration_covariance[8] = 0.01;
@@ -119,6 +148,12 @@ private:
 
     std::string lidar_frame_;
     std::string imu_frame_;
+
+    // 扫描帧累积缓冲（仅由 parser spin 线程访问，无需锁）
+    std::vector<LidarPoint> acc_;
+    double                  acc_start_ts_{0.0};
+    double                  scan_period_{0.1};
+    size_t                  max_pts_{8192};
 };
 
 int main(int argc, char **argv) {

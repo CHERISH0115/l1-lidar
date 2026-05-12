@@ -11,6 +11,7 @@ fast_lio:
     common.max_iteration:       4
     common.filter_size_corner:  0.1
     common.filter_size_map:     0.2
+    common.cube_side_length: 200.0   # 局部地图边长 (m)
 
     common.imu_acc_n:   0.1
     common.imu_gyr_n:   0.01

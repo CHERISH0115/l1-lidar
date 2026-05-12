@@ -8,6 +8,12 @@ RUN apt-get update && apt-get install -y \
     qtwayland5 \
     qtbase5-dev \
     libqt5opengl5-dev \
+    # 硬件加速 OpenGL / EGL
+    mesa-utils \
+    libegl1-mesa \
+    libgles2-mesa \
+    libegl1-mesa-dev \
+    libgles2-mesa-dev \
     # FAST-LIO2 依赖
     libeigen3-dev \
     libpcl-dev \

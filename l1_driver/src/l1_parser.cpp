@@ -114,8 +114,8 @@ void L1Parser::spin() {
 // ── 分发 ─────────────────────────────────────────────────────────
 void L1Parser::dispatch(uint32_t msgid, const uint8_t *p, uint8_t len, double ts) {
     if (msgid == MSGID_IMU       && len >= 42) handle_imu(p, ts);
-    if (msgid == MSGID_AUXILIARY && len >= 89) handle_aux(p);
-    if (msgid == MSGID_DISTANCE  && len >= 6)  handle_dist(p, ts);
+    if (msgid == MSGID_AUXILIARY && len >= 209) handle_aux(p);
+    if (msgid == MSGID_DISTANCE  && len >= 246) handle_dist(p, ts);
 }
 
 // ── IMU 帧（msgid=19, 42字节）────────────────────────────────────

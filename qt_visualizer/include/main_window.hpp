@@ -17,7 +17,6 @@ public:
 private slots:
     void on_clear_clicked();
     void on_reset_view_clicked();
-    void on_max_frames_changed(int v);
     void on_export_clicked();
     void update_fps();
 

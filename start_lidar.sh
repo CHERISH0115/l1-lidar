@@ -46,7 +46,7 @@ docker run -d --name $DRIVER_CTR \
     -e WAYLAND_DISPLAY=wayland-0 \
     -e XDG_RUNTIME_DIR=$RUNTIME_DIR \
     -e QT_QPA_PLATFORM=wayland \
-    -e LIBGL_ALWAYS_SOFTWARE=1 \
+    -e LIBGL_ALWAYS_SOFTWARE=0 \
     -v $RUNTIME_DIR/wayland-0:$RUNTIME_DIR/wayland-0 \
     -v "$WORKSPACE:/workspace" \
     $IMAGE \
